@@ -19,27 +19,27 @@ class Job:
 
     @classmethod
     def from_html(cls, job_tag) -> "Job":
-        # Title is usually in <h1> or <h2>
+
         title_el = job_tag.find(["h1", "h2"])
         title = title_el.get_text(strip=True) if title_el else "N/A"
 
-        # Company + location often live in a small <p> / <span> block
+
         info_el = job_tag.find(class_="info") or job_tag.find("p")
         info_text = info_el.get_text(" ", strip=True) if info_el else ""
 
-        # Split "Company – Location" if possible
+
         if " - " in info_text:
             company, location = info_text.split(" - ", maxsplit=1)
         else:
             company, location = info_text, ""
 
-        # First link in the job block
+
         link_el = job_tag.find("a", href=True)
         link = link_el["href"] if link_el else ""
         if link and not link.startswith("http"):
             link = BASE_URL.rstrip("/") + "/" + link.lstrip("/")
 
-        # Short description / summary
+
         summary_el = job_tag.find("p")
         summary = summary_el.get_text(strip=True) if summary_el else ""
 
@@ -62,19 +62,18 @@ def fetch_jobs(page: Optional[int] = None) -> List[Job]:
     if page is None or page == 1:
         url = BASE_URL + "/"
     else:
-        # If pagination is different, adjust this pattern.
+
         url = f"{BASE_URL}/page/{page}/"
 
     soup = _get_soup(url)
 
-    # Main job containers – class name may need tweaking if site changes.
     job_blocks = soup.select(".job") or soup.select("li.job") or soup.select("div.job")
 
     jobs: List[Job] = []
     for block in job_blocks:
         try:
             jobs.append(Job.from_html(block))
-        except Exception as exc:  # skip malformed entries, but keep scraping
+        except Exception as exc:
             print(f"[WARN] Failed to parse a job: {exc}")
 
     return jobs
