@@ -1,55 +1,40 @@
+
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import List, Optional
+from typing import Optional, List
 
 import requests
-from bs4 import BeautifulSoup
-
-BASE_URL = "https://pythonjobs.github.io"
+from bs4 import BeautifulSoup, Tag
 
 
 @dataclass
-class Job:
-    title: str
-    company: str
-    location: str
-    link: str
-    summary: str
+class SiteConfig:
+    base_url: str
 
-    @classmethod
-    def from_html(cls, job_tag) -> "Job":
-
-        title_el = job_tag.find(["h1", "h2"])
-        title = title_el.get_text(strip=True) if title_el else "N/A"
+    list_url: str  # e.g. "https://pythonjobs.github.io/" or ".../page/{page}/"
 
 
-        info_el = job_tag.find(class_="info") or job_tag.find("p")
-        info_text = info_el.get_text(" ", strip=True) if info_el else ""
+    job_selector: str
+    title_selector: str
+    company_selector: str
+    location_selector: Optional[str] = None
+    summary_selector: Optional[str] = None
+    link_selector: str = "a"
+    link_attribute: str = "href"
 
+    company_location_splitter: Optional[str] = " - "
 
-        if " - " in info_text:
-            company, location = info_text.split(" - ", maxsplit=1)
-        else:
-            company, location = info_text, ""
+PYTHONJOBS_CONFIG = SiteConfig(
+    base_url="https://pythonjobs.github.io",
+    list_url="https://pythonjobs.github.io/",
+    job_selector=".job",
+    title_selector="h1, h2",
+    company_selector=".info",
+    summary_selector="p",
+    company_location_splitter=" - ",
+)
 
-
-        link_el = job_tag.find("a", href=True)
-        link = link_el["href"] if link_el else ""
-        if link and not link.startswith("http"):
-            link = BASE_URL.rstrip("/") + "/" + link.lstrip("/")
-
-
-        summary_el = job_tag.find("p")
-        summary = summary_el.get_text(strip=True) if summary_el else ""
-
-        return cls(
-            title=title,
-            company=company,
-            location=location,
-            link=link,
-            summary=summary,
-        )
 
 
 def _get_soup(url: str) -> BeautifulSoup:
@@ -58,38 +43,81 @@ def _get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(resp.text, "html.parser")
 
 
-def fetch_jobs(page: Optional[int] = None) -> List[Job]:
-    if page is None or page == 1:
-        url = BASE_URL + "/"
+def _abs_url(base_url: str, maybe_relative: str) -> str:
+    if maybe_relative.startswith("http://") or maybe_relative.startswith("https://"):
+        return maybe_relative
+    return base_url.rstrip("/") + "/" + maybe_relative.lstrip("/")
+
+
+def parse_job(job_tag: Tag, cfg: SiteConfig) -> dict:
+    """Turn a single job HTML block into a Python dict, using only cfg."""
+
+    title_el = job_tag.select_one(cfg.title_selector)
+    title = title_el.get_text(strip=True) if title_el else ""
+
+    company = ""
+    location = ""
+
+    info_el = job_tag.select_one(cfg.company_selector)
+    info_text = info_el.get_text(" ", strip=True) if info_el else ""
+
+    if cfg.location_selector:
+        company = info_text
+        loc_el = job_tag.select_one(cfg.location_selector)
+        if loc_el:
+            location = loc_el.get_text(strip=True)
     else:
+        if cfg.company_location_splitter and cfg.company_location_splitter in info_text:
+            company, location = info_text.split(cfg.company_location_splitter, 1)
+        else:
+            company = info_text
 
-        url = f"{BASE_URL}/page/{page}/"
+    # link
+    link_el = job_tag.select_one(cfg.link_selector)
+    link = ""
+    if link_el and cfg.link_attribute in link_el.attrs:
+        link = _abs_url(cfg.base_url, link_el[cfg.link_attribute])
 
-    soup = _get_soup(url)
+    # summary
+    summary = ""
+    if cfg.summary_selector:
+        sum_el = job_tag.select_one(cfg.summary_selector)
+        if sum_el:
+            summary = sum_el.get_text(strip=True)
 
-    job_blocks = soup.select(".job") or soup.select("li.job") or soup.select("div.job")
-
-    jobs: List[Job] = []
-    for block in job_blocks:
-        try:
-            jobs.append(Job.from_html(block))
-        except Exception as exc:
-            print(f"[WARN] Failed to parse a job: {exc}")
-
-    return jobs
+    return {
+        "title": title,
+        "company": company,
+        "location": location,
+        "link": link,
+        "summary": summary,
+    }
 
 
-def scrape_many_pages(pages: int = 1) -> List[Job]:
-    all_jobs: List[Job] = []
+def scrape(config: SiteConfig, pages: int = 1) -> List[dict]:
+    all_jobs: List[dict] = []
+
     for page in range(1, pages + 1):
-        print(f"[INFO] Scraping page {page}...")
-        page_jobs = fetch_jobs(page=page)
-        if not page_jobs:
-            print(f"[INFO] No jobs found on page {page}, stopping.")
+        if "{page}" in config.list_url:
+            url = config.list_url.format(page=page)
+        else:
+            # no pagination: only scrape once
+            if page > 1:
+                break
+            url = config.list_url
+
+        print(f"[INFO] Scraping {url} ...")
+        soup = _get_soup(url)
+
+        blocks = soup.select(config.job_selector)
+        if not blocks:
+            print("[WARN] No job blocks found with selector:", config.job_selector)
             break
-        all_jobs.extend(page_jobs)
+
+        for b in blocks:
+            try:
+                all_jobs.append(parse_job(b, config))
+            except Exception as e:
+                print("[WARN] Failed to parse one job:", e)
+
     return all_jobs
-
-
-def jobs_to_dicts(jobs: List[Job]) -> List[dict]:
-    return [asdict(job) for job in jobs]

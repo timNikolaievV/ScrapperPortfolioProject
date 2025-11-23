@@ -2,8 +2,7 @@ import csv
 import json
 from pathlib import Path
 
-from scraper import scrape_many_pages, jobs_to_dicts
-
+from scraper import scrape, PYTHONJOBS_CONFIG
 OUTPUT_DIR = Path("data")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -29,27 +28,23 @@ def save_to_json(jobs: list[dict], path: Path) -> None:
     print(f"[OK] Saved JSON to {path}")
 
 
-def main(pages: int = 1) -> None:
-    print("[INFO] Starting Python jobs scraper...")
-    jobs = scrape_many_pages(pages=pages)
-    jobs_dicts = jobs_to_dicts(jobs)
+def main() -> None:
+    config = PYTHONJOBS_CONFIG
 
-    print(f"[INFO] Scraped {len(jobs_dicts)} jobs.\n")
+    print("[INFO] Starting scraper...")
+    jobs = scrape(config, pages=1)
 
-    # Pretty-print first few
-    for job in jobs_dicts[:5]:
+    print(f"[INFO] Scraped {len(jobs)} jobs.\n")
+    for job in jobs[:5]:
         print(f"- {job['title']} @ {job['company']} ({job['location']})")
         print(f"  {job['link']}")
         if job["summary"]:
             print(f"  {job['summary'][:120]}...")
         print()
 
-    csv_path = OUTPUT_DIR / "python_jobs.csv"
-    json_path = OUTPUT_DIR / "python_jobs.json"
-
-    save_to_csv(jobs_dicts, csv_path)
-    save_to_json(jobs_dicts, json_path)
+    save_to_csv(jobs, OUTPUT_DIR / "jobs.csv")
+    save_to_json(jobs, OUTPUT_DIR / "jobs.json")
 
 
 if __name__ == "__main__":
-    main(pages=1)
+    main()
